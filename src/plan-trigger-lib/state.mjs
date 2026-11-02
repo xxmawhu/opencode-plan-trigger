@@ -1,4 +1,4 @@
-// Durable per-plan-directory state: which plan files already triggered an injection.
+// Durable per-plan-directory state: which plan file signatures already triggered an injection.
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -54,15 +54,16 @@ export function createStateStore({ planDir, stateDir } = {}) {
       initializedAt: new Date().toISOString(),
       processed: Object.fromEntries(processed),
     };
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     try {
       if (!existsSync(root)) mkdirSync(root, { recursive: true });
-      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
       writeFileSync(tmp, JSON.stringify(payload, null, 2));
       renameSync(tmp, file);
       return true;
     } catch {
+      // Keep the previous good state file; only clean up the partial temp file.
       try {
-        if (existsSync(file)) unlinkSync(file);
+        if (existsSync(tmp)) unlinkSync(tmp);
       } catch {
         // Best effort only.
       }
@@ -80,13 +81,16 @@ export function createStateStore({ planDir, stateDir } = {}) {
     save();
   }
 
-  function has(path) {
-    return processed.has(path);
+  function has(path, signature) {
+    const stored = processed.get(path);
+    if (stored === undefined) return false;
+    if (signature === undefined) return true;
+    return stored === signature;
   }
 
-  function mark(path) {
-    const signature = fileSignature(path);
-    processed.set(path, signature === undefined ? "unknown" : signature);
+  function mark(path, signature) {
+    const value = signature === undefined ? fileSignature(path) : signature;
+    processed.set(path, value === undefined ? "unknown" : value);
     save();
   }
 

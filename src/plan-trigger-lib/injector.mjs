@@ -1,4 +1,4 @@
-// Serial prompt injection queue with bounded retries. A plan path is injected once.
+// Serial prompt injection queue with bounded retries. A path+signature pair is injected once.
 const DEFAULT_MAX_AGE_MS = 30 * 60 * 1000;
 const NO_SESSION_RETRY_MS = 5000;
 const BUSY_RETRY_MS = [2000, 5000, 10000, 30000, 60000];
@@ -110,10 +110,10 @@ export function createInjector({
     }
   }
 
-  function enqueue(path, text) {
+  function enqueue(path, text, signature) {
     if (stopped || known.has(path)) return false;
     known.add(path);
-    queue.push({ path, text, attempts: 0, createdAt: now() });
+    queue.push({ path, text, signature, attempts: 0, createdAt: now() });
     logger?.info("queued plan injection", { path, queue: queue.length });
     void flush();
     return true;

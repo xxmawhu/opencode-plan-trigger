@@ -20,7 +20,11 @@ function signatureOf(file) {
   try {
     const stat = statSync(file);
     if (!stat.isFile()) return undefined;
-    return { signature: `${stat.dev}:${stat.ino}:${stat.size}:${Math.trunc(stat.mtimeMs)}`, size: stat.size };
+    return {
+      signature: `${stat.dev}:${stat.ino}:${stat.size}:${Math.trunc(stat.mtimeMs)}`,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+    };
   } catch {
     return undefined;
   }
@@ -38,6 +42,8 @@ export function createPlanWatcher({
   onReady,
   quietMs = 800,
   pollMs = 30_000,
+  baselineGraceMs = 10 * 60_000,
+  reInjectionCooldownMs = 60_000,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   setIntervalFn = setInterval,
@@ -47,7 +53,8 @@ export function createPlanWatcher({
   let pollTimer;
   let missingLoggedAt = 0;
   const candidates = new Map();
-  const dispatched = new Set();
+  // Last accepted dispatch time per path; used only for the re-injection debounce window.
+  const lastDispatched = new Map();
 
   function listFiles() {
     let entries;
@@ -73,23 +80,29 @@ export function createPlanWatcher({
     candidates.delete(path);
   }
 
-  function dispatch(path) {
+  function dispatch(path, info) {
     candidates.delete(path);
-    if (state.has(path) || dispatched.has(path)) return;
-    dispatched.add(path);
+    if (state.has(path, info.signature)) return;
+    const lastAt = lastDispatched.get(path);
+    if (lastAt !== undefined && Date.now() - lastAt < reInjectionCooldownMs) return;
     try {
-      const result = onReady(path);
+      const result = onReady(path, info.signature);
       if (result && typeof result.catch === "function") {
         result.catch((error) => logger?.error("plan ready handler failed", { path, error: String(error) }));
       }
+      if (result !== false) lastDispatched.set(path, Date.now());
     } catch (error) {
       logger?.error("plan ready handler threw", { path, error: String(error) });
     }
   }
 
   function schedule(path, info) {
-    if (state.has(path) || dispatched.has(path)) return;
+    if (state.has(path, info.signature)) return;
+    // Drop a stale candidate before the cooldown check; otherwise a deferred
+    // change can be blocked forever by an already-fired timer entry.
     cancel(path);
+    const lastAt = lastDispatched.get(path);
+    if (lastAt !== undefined && Date.now() - lastAt < reInjectionCooldownMs) return;
     const candidate = { signature: info.signature, size: info.size, timer: undefined };
     candidates.set(path, candidate);
     candidate.timer = unref(
@@ -111,7 +124,7 @@ export function createPlanWatcher({
           cancel(path);
           return;
         }
-        dispatch(path);
+        dispatch(path, latest);
       }, quietMs),
     );
   }
@@ -125,7 +138,7 @@ export function createPlanWatcher({
       state.forget(path);
       return;
     }
-    if (state.has(path) || dispatched.has(path)) return;
+    if (state.has(path, info.signature)) return;
     schedule(path, info);
   }
 
@@ -134,9 +147,12 @@ export function createPlanWatcher({
     const files = listFiles();
     const existing = new Set(files.map((file) => file.path));
     state.prune(existing);
+    for (const path of [...lastDispatched.keys()]) {
+      if (!existing.has(path)) lastDispatched.delete(path);
+    }
     for (const file of files) {
       if (file.size === 0) continue;
-      if (state.has(file.path) || dispatched.has(file.path)) continue;
+      if (state.has(file.path, file.signature)) continue;
       if (candidates.has(file.path)) continue;
       schedule(file.path, file);
     }
@@ -184,7 +200,17 @@ export function createPlanWatcher({
     async start() {
       const loaded = state.load();
       if (!loaded || !state.initialized) {
-        state.baseline(listFiles().map((file) => file.path));
+        const cutoff = Date.now() - baselineGraceMs;
+        const baselinePaths = [];
+        for (const file of listFiles()) {
+          if (file.mtimeMs > cutoff) continue;
+          baselinePaths.push(file.path);
+          logger?.info("baseline skip existing plan", {
+            path: file.path,
+            mtime: new Date(file.mtimeMs).toISOString(),
+          });
+        }
+        state.baseline(baselinePaths);
       }
       scanNow();
       pollTimer = unref(setIntervalFn(scanNow, pollMs));
