@@ -1,0 +1,27 @@
+# 运行时目录（不进入版本控制）
+issues/
+plan/
+end_task/
+data/
+memory/
+!memory/.gitkeep
+tmp-issues/
+/.var/
+/log/
+
+# 项目根 AGENTS.md 由模板分发（git init --template / install.sh）生成，不入库
+AGENTS.md
+
+# Node / 测试产物
+node_modules/
+tests/.tmp*/
+coverage/
+
+# 日志
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

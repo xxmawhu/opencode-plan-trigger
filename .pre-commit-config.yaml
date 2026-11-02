@@ -1,0 +1,17 @@
+repos:
+  - repo: local
+    hooks:
+      - id: plan-trigger-syntax
+        name: plan-trigger syntax
+        entry: scripts/pre-commit-check.sh
+        language: script
+        files: '\.(mjs|sh)$'
+        stages: [pre-commit]
+
+      - id: plan-trigger-post-merge-install
+        name: plan-trigger install after pull
+        entry: scripts/post-merge-hook.sh
+        language: script
+        always_run: true
+        pass_filenames: false
+        stages: [post-merge]
