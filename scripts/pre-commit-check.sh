@@ -14,17 +14,17 @@ check_file() {
     *.mjs)
       command -v node >/dev/null 2>&1 || return 0
       if node --check "$file" >>"$LOG_FILE" 2>&1; then
-        record PASS "$file"
+        record INFO "$file"
       else
-        record FAIL "$file"
+        record ERROR "$file"
         return 1
       fi
       ;;
     *.sh)
       if bash -n "$file" >>"$LOG_FILE" 2>&1; then
-        record PASS "$file"
+        record INFO "$file"
       else
-        record FAIL "$file"
+        record ERROR "$file"
         return 1
       fi
       ;;

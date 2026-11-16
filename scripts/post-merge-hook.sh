@@ -11,10 +11,10 @@ run_stage() {
   shift
   printf '[%s] [INFO] [stage:%s] start: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$name" "$*" >>"$LOG_FILE"
   if "$@" >>"$LOG_FILE" 2>&1; then
-    printf '[%s] [PASS] [stage:%s] done\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$name" >>"$LOG_FILE"
+    printf '[%s] [INFO] [stage:%s] done\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$name" >>"$LOG_FILE"
     return 0
   fi
-  printf '[%s] [FAIL] [stage:%s] failed: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$name" "$*" >>"$LOG_FILE"
+  printf '[%s] [ERROR] [stage:%s] failed: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$name" "$*" >>"$LOG_FILE"
   return 1
 }
 

@@ -10,7 +10,7 @@ OpenCode 插件。监控项目根目录下的 `plan/`，新写入完成的 plan 
 
 ## 环境要求
 
-- OpenCode v1 或 v2
+- OpenCode 1.x 或 2.x（同一份安装同时服务两代宿主）
 - 无需安装任何 npm 依赖
 
 ## 安装
@@ -19,12 +19,18 @@ OpenCode 插件。监控项目根目录下的 `plan/`，新写入完成的 plan 
 ./install.sh
 ```
 
-安装会把插件写入 `~/.config/opencode/`：
+安装布局遵循 OpenCode 插件安装契约 v1：
 
-- v1：`~/.config/opencode/plugin/plan-trigger.ts`
-- v2：`~/.config/opencode/plugins/plan-trigger/index.ts`
+- 入口（两代共用同一文件）：`~/.config/opencode/plugin/plan-trigger.ts`
+- 共享库（在插件扫描目录之外）：`~/.config/opencode/plan-trigger-lib/`
 
-重新执行 `./install.sh` 即可升级。仓库已配置 `post-merge` hook，`git pull` 后会自动重新安装。
+安装同时满足三条约束：
+
+- 库在扫描区外：宿主不会把 `plan-trigger-lib/` 当插件加载。
+- 单次生效：一个入口文件，每进程只激活一次。
+- 零告警验收：两个宿主启动日志均无 `failed to load plugin`。
+
+重新执行 `./install.sh` 即可升级，重复安装结果一致。仓库已配置 `post-merge` hook，`git pull` 后会自动重新安装。
 
 验证：重启 OpenCode，在任意项目写入一个非空 `plan/*.md`，随后查看运行日志出现 `injected plan prompt`。
 
@@ -56,9 +62,11 @@ your-project/
 
 ```bash
 rm -rf ~/.config/opencode/plugin/plan-trigger.ts \
-       ~/.config/opencode/plugin/plan-trigger-lib \
-       ~/.config/opencode/plugins/plan-trigger
+       ~/.config/opencode/plan-trigger-lib
 ```
+
+旧版本遗留的 `~/.config/opencode/plugin/plan-trigger-lib` 与
+`~/.config/opencode/plugins/plan-trigger` 会被 `install.sh` 自动删除。
 
 ## 常见问题
 
@@ -69,3 +77,8 @@ rm -rf ~/.config/opencode/plugin/plan-trigger.ts \
 **注入了但会话没有开始执行**
 
 注入会发送到最近活跃的会话；当前没有打开会话时，排队等待新会话出现后再注入。
+
+**启动日志出现 `failed to load plugin`**
+
+重新执行 `./install.sh`。若仍出现，检查 `~/.config/opencode/plugin/` 与
+`~/.config/opencode/plugins/` 下是否残留旧版库目录。

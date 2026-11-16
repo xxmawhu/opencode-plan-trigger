@@ -9,7 +9,7 @@ tmp-issues/
 /.var/
 /log/
 
-# 项目根 AGENTS.md 由模板分发（git init --template / install.sh）生成，不入库
+# 项目根禁止任何形态 AGENTS.md（规则唯一来源为全局 ~/.config/opencode/AGENTS.md）
 AGENTS.md
 
 # Node / 测试产物

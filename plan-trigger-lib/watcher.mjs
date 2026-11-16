@@ -183,8 +183,8 @@ export function createPlanWatcher({
       const now = Date.now();
       if (now - missingLoggedAt > 300_000) {
         missingLoggedAt = now;
-        // [log-review] 预期内：plan 目录尚未创建；降级原因：每 5 分钟重试且轮询兜底；影响范围：创建后最长延迟一个轮询周期
-        logger?.warn("plan directory is not watchable yet; polling fallback continues", {
+        // [log-review] 预期内：项目尚未创建 plan 目录属正常状态，属设计内降级，用 info；每 5 分钟重试且轮询兜底；影响范围：创建后最长延迟一个轮询周期
+        logger?.info("plan directory is not watchable yet; polling fallback continues", {
           planDir,
           error: String(error),
         });
