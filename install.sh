@@ -62,11 +62,12 @@ die_on_mode() {
 }
 
 # Repair a directory this account owns; foreign-owned parents are reported by
-# the fail-closed verification instead of being chmod'ed.
+# the fail-closed verification instead. `install -d -m` is used instead of
+# chmod so the mode is fixed at creation and never inherited from the umask.
 ensure_dir_traversable() {
   local path="$1"
-  if [[ -O "$path" ]]; then
-    chmod a+rx "$path"
+  if [[ -O "$path" ]] && ! has_other_bits "$path" 5; then
+    install -d -m 0755 "$path"
   fi
 }
 
@@ -84,13 +85,6 @@ verify_tree() {
   done < <(find_installed "$root" -mindepth 1)
 }
 
-normalize_permissions() {
-  local root="$1"
-  chmod 0755 "$root"
-  find_installed "$root" -type d -exec chmod 0755 {} +
-  find_installed "$root" -type f -exec chmod 0644 {} +
-}
-
 verify_permissions() {
   local stage="verify-permissions" path
   for path in "$CONFIG_DIR" "$ENTRY_DIR" "$LIB_DIR"; do
@@ -102,13 +96,15 @@ verify_permissions() {
 }
 
 # True when dst already holds exactly the source library tree (same file set and
-# bytes), so a reinstall can skip the swap and keep inodes and mtimes stable.
+# bytes, readable by other accounts), so a reinstall can skip the swap and keep
+# inodes and mtimes stable. A permission mismatch forces a fresh swap.
 dir_matches() {
   local src="$1" dst="$2" file name
   [[ -d "$dst" ]] || return 1
+  has_other_bits "$dst" 5 || return 1
   for file in "$src"/*.mjs; do
     name="$(basename "$file")"
-    { [[ -f "$dst/$name" ]] && cmp -s "$file" "$dst/$name"; } || return 1
+    [[ -f "$dst/$name" ]] && cmp -s "$file" "$dst/$name" && has_other_bits "$dst/$name" 4 || return 1
   done
   for file in "$dst"/*.mjs; do
     name="$(basename "$file")"
@@ -123,7 +119,6 @@ replace_dir() {
   local src="$1" dst="$2"
   local tmp="${dst}.new.$$" old="${dst}.old.$$" file name
   if dir_matches "$src" "$dst"; then
-    normalize_permissions "$dst"
     return 0
   fi
   if [[ -e "$dst" && ! -d "$dst" ]]; then
@@ -136,7 +131,6 @@ replace_dir() {
     name="$(basename "$file")"
     install -m 0644 "$file" "$tmp/$name"
   done
-  normalize_permissions "$tmp"
   verify_tree "install-lib" "$tmp"
   if [[ -e "$dst" ]]; then
     mv "$dst" "$old"
@@ -151,8 +145,7 @@ replace_dir() {
 install_file() {
   local src="$1" dst="$2"
   local tmp="${dst}.tmp.$$"
-  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
-    chmod 0644 "$dst"
+  if [[ -f "$dst" ]] && cmp -s "$src" "$dst" && has_other_bits "$dst" 4; then
     return 0
   fi
   CLEANUP_TARGET="$tmp"
