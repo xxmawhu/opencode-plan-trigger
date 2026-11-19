@@ -44,7 +44,10 @@ init_log() {
     return 0
   fi
   LOG_READY=0
-  printf '[%s] [WARNING] [stage:start] 日志目录不可写，降级 stderr：%s\n' \
+  # [log-review] 预期内场景：只读安装副本、他人属主的 ./log/ 是已知例外，安装照常继续。
+  # 降级为 warning 而非 error：日志只是诊断信息，安装产物与权限契约都不受影响。
+  # 触发条件：./log/ 不可写；影响范围：仅日志去向改为 stderr。
+  printf '[%s] [WARNING] [stage:start] 日志目录不可写（只读副本或他人属主），输出转 stderr：%s\n' \
     "$(date '+%Y-%m-%d %H:%M:%S')" "$LOG_DIR" >&2
 }
 
@@ -58,7 +61,10 @@ log() {
       return 0
     fi
     LOG_READY=0
-    printf '[%s] [WARNING] [stage:%s] 写日志失败，降级 stderr：%s\n' \
+    # [log-review] 预期内场景：探针通过后目录权限或磁盘状态变化，属已知例外，安装继续。
+    # 降级为 warning 而非 error：诊断信息无处落盘，不构成安装故障。
+    # 触发条件：日志追加不可写；影响范围：仅日志去向改为 stderr。
+    printf '[%s] [WARNING] [stage:%s] 日志写入中断（目录或磁盘变化），输出转 stderr：%s\n' \
       "$(date '+%Y-%m-%d %H:%M:%S')" "$stage" "$LOG_FILE" >&2
   fi
   if [[ "$level" != INFO ]]; then
