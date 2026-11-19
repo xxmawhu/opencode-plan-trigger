@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verifies install.sh for the umask-independent permission contract (issue
-# f56c98eb) and the idempotent / legacy-cleanup rules of contract v1 (R6).
+# f56c98eb), the unwritable-log fallback (issue fafad37f) and the idempotent /
+# legacy-cleanup rules of contract v1 (R6).
 set -euo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -56,9 +57,12 @@ for umask_value in 077 022; do
   printf 'PASS: umask %s 安装权限\n' "$umask_value"
 done
 
-# Legacy paths from the pre-contract layout must disappear on upgrade.
+# Legacy paths from the pre-contract layout must disappear on upgrade. Fixture
+# dirs are created mode-explicit so the assertion does not depend on the
+# ambient umask of whoever runs the test.
 config="$WORK/legacy/.config/opencode"
-mkdir -p "$config/plugin/plan-trigger-lib" "$config/plugins/plan-trigger"
+mkdir -p "$config"
+install -d -m 0755 "$config/plugin" "$config/plugin/plan-trigger-lib" "$config/plugins/plan-trigger"
 printf 'stale\n' >"$config/plugin/plan-trigger-lib/index.mjs"
 printf 'stale\n' >"$config/plugins/plan-trigger/index.ts"
 install_into 077 "$config"
@@ -74,6 +78,22 @@ install_into 022 "$config"
 after="$(stat -c '%n:%Y:%s' "$config/plugin/plan-trigger.ts" "$config/plan-trigger-lib/"*.mjs)"
 [[ "$before" = "$after" ]] || fail "重复安装改写了未变化的文件"
 printf 'PASS: 重复安装幂等\n'
+
+# A ./log/ that exists but is not writable (foreign-owned checkout, read-only
+# install copy) must degrade to stderr and still install (issue fafad37f).
+copy="$WORK/readonly-log/repo"
+config="$WORK/readonly-log/.config/opencode"
+mkdir -p "$copy" "$config"
+cp -a "$PROJECT_DIR/install.sh" "$PROJECT_DIR/plugin" "$PROJECT_DIR/plan-trigger-lib" "$copy/"
+mkdir -p "$copy/log"
+chmod 500 "$copy/log"
+if ( umask 022; OPENCODE_CONFIG_DIR="$config" "$copy/install.sh" >/dev/null 2>&1 ); then
+  check_tree "$config"
+  printf 'PASS: 只读 ./log/ 降级 stderr 后安装成功\n'
+else
+  fail "只读 ./log/ 导致安装失败"
+fi
+chmod 700 "$copy/log"
 
 if [[ "$FAILED" -ne 0 ]]; then
   printf '\n安装权限测试失败\n'

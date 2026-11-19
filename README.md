@@ -32,6 +32,8 @@ OpenCode 插件。监控项目根目录下的 `plan/`，新写入完成的 plan 
 
 重新执行 `./install.sh` 即可升级，重复安装结果一致。仓库已配置 `post-merge` hook，`git pull` 后会自动重新安装。
 
+安装日志写入仓库 `log/install.<日期>.log`。若该目录不可写（只读副本、他人属主等），日志降级到 stderr，安装照常完成。
+
 验证：重启 OpenCode，在任意项目写入一个非空 `plan/*.md`，随后查看运行日志出现 `injected plan prompt`。
 
 ## 使用

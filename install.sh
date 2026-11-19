@@ -13,6 +13,10 @@
 # Host processes may run as accounts other than the installer, so artifacts must
 # stay readable by other accounts. Modes are set explicitly and verified
 # fail-closed instead of being inherited from the caller's umask.
+#
+# Logging is diagnostic only: a ./log/ that exists but is not writable (a
+# checkout owned by another account, or a read-only install copy) must never
+# abort the install. That case degrades to stderr and keeps installing.
 set -euo pipefail
 umask 022
 
@@ -22,6 +26,7 @@ ENTRY_DIR="$CONFIG_DIR/plugin"
 LIB_DIR="$CONFIG_DIR/plan-trigger-lib"
 LOG_DIR="$PROJECT_DIR/log"
 LOG_FILE="$LOG_DIR/install.$(date +%Y%m%d).log"
+LOG_READY=0
 CLEANUP_TARGET=""
 
 # `find` is used instead of fdfind: installers may run on hosts without fdfind,
@@ -30,15 +35,46 @@ find_installed() {
   find "$@"
 }
 
+# Both steps run with stderr already on /dev/null: a failed redirection would
+# otherwise print the shell's own "Permission denied" before `set -e` fires.
+# The probe appends nothing, so a writable log keeps its existing content.
+init_log() {
+  if ( exec 2>/dev/null; mkdir -p "$LOG_DIR" && : >>"$LOG_FILE" ); then
+    LOG_READY=1
+    return 0
+  fi
+  LOG_READY=0
+  printf '[%s] [WARNING] [stage:start] 日志目录不可写，降级 stderr：%s\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$LOG_DIR" >&2
+}
+
+# A write can start failing after the probe (disk full, directory replaced).
+# Degrade once instead of letting `set -e` turn a log write into an abort.
 log() {
-  local level="$1" stage="$2" message="$3"
-  printf '[%s] [%s] [stage:%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$stage" "$message" >>"$LOG_FILE"
+  local level="$1" stage="$2" message="$3" line
+  line="$(printf '[%s] [%s] [stage:%s] %s' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$stage" "$message")"
+  if [[ "$LOG_READY" -eq 1 ]]; then
+    if printf '%s\n' "$line" >>"$LOG_FILE" 2>/dev/null; then
+      return 0
+    fi
+    LOG_READY=0
+    printf '[%s] [WARNING] [stage:%s] 写日志失败，降级 stderr：%s\n' \
+      "$(date '+%Y-%m-%d %H:%M:%S')" "$stage" "$LOG_FILE" >&2
+  fi
+  if [[ "$level" != INFO ]]; then
+    printf '%s\n' "$line" >&2
+  fi
+  return 0
 }
 
 fail() {
   local stage="$1" message="$2"
   log ERROR "$stage" "$message"
-  printf '❌ %s（详见 log/install.%s.log）\n' "$message" "$(date +%Y%m%d)"
+  if [[ "$LOG_READY" -eq 1 ]]; then
+    printf '❌ %s（详见 log/install.%s.log）\n' "$message" "$(date +%Y%m%d)"
+  else
+    printf '❌ %s（./log/ 不可写，日志已降级 stderr）\n' "$message"
+  fi
   exit 1
 }
 
@@ -195,9 +231,9 @@ verify_contents() {
 }
 
 main() {
+  init_log
   [[ "$#" -eq 0 ]] || fail "args" "install.sh 不接受参数（配置由 OPENCODE_CONFIG_DIR 覆盖）"
   trap cleanup EXIT
-  mkdir -p "$LOG_DIR"
   log INFO "start" "project=${PROJECT_DIR} opencode=${CONFIG_DIR}"
 
   verify_sources
@@ -217,7 +253,11 @@ main() {
   verify_permissions
   verify_contents
   log INFO "done" "install complete"
-  printf '✅ plan-trigger installed（日志 log/install.%s.log）\n' "$(date +%Y%m%d)"
+  if [[ "$LOG_READY" -eq 1 ]]; then
+    printf '✅ plan-trigger installed（日志 log/install.%s.log）\n' "$(date +%Y%m%d)"
+  else
+    printf '✅ plan-trigger installed（./log/ 不可写，日志已降级 stderr）\n'
+  fi
 }
 
 main "$@"
