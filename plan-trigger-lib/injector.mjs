@@ -1,4 +1,6 @@
 // Serial prompt injection queue with bounded retries. A path+signature pair is injected once.
+import { existsSync } from "node:fs";
+
 const DEFAULT_MAX_AGE_MS = 30 * 60 * 1000;
 const NO_SESSION_RETRY_MS = 5000;
 const BUSY_RETRY_MS = [2000, 5000, 10000, 30000, 60000];
@@ -12,6 +14,7 @@ export function createInjector({
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   now = () => Date.now(),
+  fileExists = existsSync,
 } = {}) {
   const queue = [];
   const known = new Set();
@@ -46,8 +49,21 @@ export function createInjector({
       while (queue.length > 0) {
         const item = queue[0];
         if (now() - item.createdAt > maxAgeMs) {
-          drop(item, "expired");
-          continue;
+          // A plan that never reached a session must not be dropped: dropping it
+          // also clears `known`, so the watcher re-enqueues the same file and it
+          // is dropped again every maxAgeMs forever (issue f3ac58b8).
+          if (!fileExists(item.path)) {
+            drop(item, "missing");
+            continue;
+          }
+          // [log-review] 预期内：会话长时间忙导致 plan 未送达；降级原因：任务仍需完成，丢弃会让提醒永久丢失；
+          // 影响范围：仅重置老化计时并每个 maxAgeMs 提示一次，队列项保留并继续尝试注入。
+          item.createdAt = now();
+          logger?.warn("plan still waiting for an idle session", {
+            path: item.path,
+            attempts: item.attempts,
+            waitedMs: maxAgeMs,
+          });
         }
         let sessionID;
         try {

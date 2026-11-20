@@ -15,6 +15,8 @@ HOME_DIR="$WORK/home"
 CFG="$HOME_DIR/.config/opencode"
 LOG="$HOME_DIR/.local/state/opencode-plan-trigger/plan-trigger.log"
 FAILED=0
+HOSTS_RUN=0
+HOSTS_SKIPPED=""
 
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
@@ -57,25 +59,47 @@ check_scan_dirs
 [[ -f "$CFG/plan-trigger-lib/index.mjs" ]] || fail "缺少共享库 $CFG/plan-trigger-lib/index.mjs"
 
 if [[ -x "$V2_BIN" ]]; then
+  HOSTS_RUN=$((HOSTS_RUN + 1))
   for round in $(seq 1 "$ROUNDS"); do
     run_case "v2" "$round" "$WORK/v2-$round.log" \
       "$V2_BIN" --standalone --print-logs --log-level debug debug agents
   done
   check_scan_dirs
 else
+  HOSTS_SKIPPED+=" v2"
   printf 'SKIP: v2 宿主 %s 不可执行\n' "$V2_BIN"
 fi
 
-for round in $(seq 1 "$ROUNDS"); do
+# `opencode debug info` is a v1-only subcommand: a v2 host rejects it, so the
+# entry assertion may only run when that host answers it. Without this guard a
+# v2-only machine reports "entry missing" instead of "no v1 host" (issue 3a014eb2).
+# The v2 branch above already guards on executability; this one mirrors it.
+V1_READY=0
+if [[ -x "$V1_BIN" ]] && "$V1_BIN" debug info >/dev/null 2>&1; then
+  V1_READY=1
+fi
+
+if [[ "$V1_READY" -eq 1 ]]; then
+  HOSTS_RUN=$((HOSTS_RUN + 1))
   if ! "$V1_BIN" debug info 2>/dev/null | rg -q 'plugin/plan-trigger.ts'; then
-    fail "v1 debug info 未列出 plan-trigger.ts 入口"
+    fail "v1 debug info 未列出 plan-trigger.ts 入口（宿主支持 debug info，说明入口未加载）"
   fi
-  run_case "v1" "$round" "$WORK/v1-$round.log" \
-    "$V1_BIN" run hi --model nonexistent/nonexistent --print-logs --log-level DEBUG
-done
+  for round in $(seq 1 "$ROUNDS"); do
+    run_case "v1" "$round" "$WORK/v1-$round.log" \
+      "$V1_BIN" run hi --model nonexistent/nonexistent --print-logs --log-level DEBUG
+  done
+else
+  HOSTS_SKIPPED+=" v1"
+  printf 'SKIP: v1 宿主 %s 不可执行或不支持 debug info\n' "$V1_BIN"
+fi
+
+if [[ "$HOSTS_RUN" -eq 0 ]]; then
+  printf '\n无可用宿主（v1 与 v2 均跳过），契约未验收%s\n' "$HOSTS_SKIPPED"
+  exit 1
+fi
 
 if [[ "$FAILED" -ne 0 ]]; then
   printf '\n契约验收失败\n'
   exit 1
 fi
-printf '\n契约验收通过（v1/v2 各 %s 轮）\n' "$ROUNDS"
+printf '\n契约验收通过（%s 个宿主各 %s 轮；跳过:%s）\n' "$HOSTS_RUN" "$ROUNDS" "${HOSTS_SKIPPED:- 无}"
